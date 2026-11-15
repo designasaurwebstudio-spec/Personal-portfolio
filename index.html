@@ -41548,52 +41548,170 @@ void main() {
 
         let played = false, on = false;
 
-        function createAudioTrack(sources) {
-          const aud = new Audio();
-          aud.loop = true;
-          aud.preload = 'auto';
-          let sIdx = 0;
-          aud.src = sources[0];
-          aud.addEventListener('error', () => {
-            sIdx++;
-            if (sIdx < sources.length) {
-              aud.src = sources[sIdx];
-              aud.load();
-            }
-          });
+        // Create in-DOM audio elements for 100% native browser media compatibility
+        function createDOMAudio(id, sources) {
+          let aud = document.getElementById(id);
+          if (!aud) {
+            aud = document.createElement('audio');
+            aud.id = id;
+            aud.loop = true;
+            aud.setAttribute('playsinline', '');
+            aud.setAttribute('webkit-playsinline', '');
+            aud.preload = 'auto';
+            sources.forEach(src => {
+              const s = document.createElement('source');
+              s.src = src;
+              s.type = 'audio/mpeg';
+              aud.appendChild(s);
+            });
+            document.body.appendChild(aud);
+          }
           return aud;
         }
 
-        // Day song: Day song.mp3 | Night song: Background score.mp3
-        const audioDay = createAudioTrack([
+        const domAudioDay = createDOMAudio('audioDay', [
           '/day-song.mp3',
           'day-song.mp3',
-          'Day%20song.mp3',
-          'Day song.mp3',
           '/v2/sfx/day-song.mp3',
-          'https://www.jameschugh.com/day-song.mp3'
+          'v2/sfx/day-song.mp3',
+          '/Day%20song.mp3',
+          'Day%20song.mp3'
         ]);
 
-        const audioNight = createAudioTrack([
+        const domAudioNight = createDOMAudio('audioNight', [
           '/background-score.mp3',
           'background-score.mp3',
-          'Background%20score.mp3',
-          'Background score.mp3',
           '/v2/sfx/background-score.mp3',
-          'https://www.jameschugh.com/background-score.mp3'
+          'v2/sfx/background-score.mp3',
+          '/Background%20score.mp3',
+          'Background%20score.mp3'
         ]);
 
-        // Expose for testing/debugging
-        window._audioDay = audioDay;
-        window._audioNight = audioNight;
+        // Web Audio API engine for zero-latency, range-free playback
+        let audioCtx = null;
+        let dayBuffer = null, nightBuffer = null;
+        let daySource = null, nightSource = null;
+        let dayGain = null, nightGain = null;
+        let webAudioReady = false;
+
+        function getAudioContext() {
+          if (!audioCtx) {
+            const AC = window.AudioContext || window.webkitAudioContext;
+            if (AC) audioCtx = new AC();
+          }
+          if (audioCtx && audioCtx.state === 'suspended') {
+            audioCtx.resume();
+          }
+          return audioCtx;
+        }
+
+        // Preload Web Audio buffers
+        async function loadBuffer(url) {
+          try {
+            const ctx = getAudioContext();
+            if (!ctx) return null;
+            const res = await fetch(url);
+            if (!res.ok) return null;
+            const ab = await res.arrayBuffer();
+            return await ctx.decodeAudioData(ab);
+          } catch (_) {
+            return null;
+          }
+        }
+
+        async function initWebAudio() {
+          if (webAudioReady) return;
+          try {
+            const [bDay, bNight] = await Promise.all([
+              loadBuffer('/day-song.mp3'),
+              loadBuffer('/background-score.mp3')
+            ]);
+            dayBuffer = bDay;
+            nightBuffer = bNight;
+            if (dayBuffer && nightBuffer) webAudioReady = true;
+          } catch (_) {}
+        }
+
+        // Start loading buffers early
+        initWebAudio();
+        addEventListener('pointerdown', () => { getAudioContext(); initWebAudio(); }, { once: true, passive: true });
 
         const isNight = () => document.documentElement.dataset.theme === 'dark';
-        const getCurrentAudio = () => isNight() ? audioNight : audioDay;
 
-        function fadeIn(aud, targetVol = 0.75) {
+        // Expose handles for debugging
+        window._audioDay = domAudioDay;
+        window._audioNight = domAudioNight;
+
+        function playWebAudio() {
+          const ctx = getAudioContext();
+          if (!ctx || !dayBuffer || !nightBuffer) return false;
+
+          try {
+            if (daySource) { try { daySource.stop(); } catch (_) {} }
+            if (nightSource) { try { nightSource.stop(); } catch (_) {} }
+
+            daySource = ctx.createBufferSource();
+            daySource.buffer = dayBuffer;
+            daySource.loop = true;
+
+            nightSource = ctx.createBufferSource();
+            nightSource.buffer = nightBuffer;
+            nightSource.loop = true;
+
+            dayGain = ctx.createGain();
+            nightGain = ctx.createGain();
+
+            const night = isNight();
+            dayGain.gain.setValueAtTime(night ? 0 : 0.75, ctx.currentTime);
+            nightGain.gain.setValueAtTime(night ? 0.75 : 0, ctx.currentTime);
+
+            daySource.connect(dayGain);
+            dayGain.connect(ctx.destination);
+
+            nightSource.connect(nightGain);
+            nightGain.connect(ctx.destination);
+
+            daySource.start(0);
+            nightSource.start(0);
+            return true;
+          } catch (e) {
+            console.warn('WebAudio play fallback to HTML5 Audio:', e);
+            return false;
+          }
+        }
+
+        function stopWebAudio() {
+          if (!audioCtx) return;
+          try {
+            const t = audioCtx.currentTime;
+            if (dayGain) dayGain.gain.linearRampToValueAtTime(0, t + 0.3);
+            if (nightGain) nightGain.gain.linearRampToValueAtTime(0, t + 0.3);
+            setTimeout(() => {
+              if (daySource) { try { daySource.stop(); } catch (_) {} daySource = null; }
+              if (nightSource) { try { nightSource.stop(); } catch (_) {} nightSource = null; }
+            }, 350);
+          } catch (_) {}
+        }
+
+        function crossfadeWebAudio(toNight) {
+          if (!audioCtx || !dayGain || !nightGain) return;
+          try {
+            const t = audioCtx.currentTime;
+            if (toNight) {
+              dayGain.gain.linearRampToValueAtTime(0, t + 0.3);
+              nightGain.gain.linearRampToValueAtTime(0.75, t + 0.3);
+            } else {
+              nightGain.gain.linearRampToValueAtTime(0, t + 0.3);
+              dayGain.gain.linearRampToValueAtTime(0.75, t + 0.3);
+            }
+          } catch (_) {}
+        }
+
+        // HTML5 Audio fallback engine
+        function fadeInHTML5(aud, targetVol = 0.75) {
           if (!aud) return;
           clearInterval(aud._fadeTimer);
-          if (aud.volume < 0.2) aud.volume = 0.2;
+          aud.volume = Math.max(0.1, aud.volume || 0);
           aud._fadeTimer = setInterval(() => {
             if (aud.volume < targetVol - 0.05) {
               aud.volume = Math.min(targetVol, aud.volume + 0.05);
@@ -41601,17 +41719,13 @@ void main() {
               aud.volume = targetVol;
               clearInterval(aud._fadeTimer);
             }
-          }, 40);
+          }, 35);
         }
 
-        function fadeOut(aud, cb) {
+        function fadeOutHTML5(aud, cb) {
           if (!aud) { if (cb) cb(); return; }
           clearInterval(aud._fadeTimer);
-          if (aud.paused) {
-            aud.volume = 0;
-            if (cb) cb();
-            return;
-          }
+          if (aud.paused) { aud.volume = 0; if (cb) cb(); return; }
           aud._fadeTimer = setInterval(() => {
             if (aud.volume > 0.08) {
               aud.volume = Math.max(0, aud.volume - 0.08);
@@ -41621,32 +41735,54 @@ void main() {
               aud.pause();
               if (cb) cb();
             }
-          }, 40);
+          }, 35);
+        }
+
+        function playDOMAudio() {
+          const active = isNight() ? domAudioNight : domAudioDay;
+          const inactive = isNight() ? domAudioDay : domAudioNight;
+          fadeOutHTML5(inactive);
+          active.volume = 0.75;
+          const p = active.play();
+          if (p && p.catch) {
+            p.catch(err => {
+              console.warn('DOM Audio play error:', err);
+            });
+          }
+        }
+
+        function stopDOMAudio() {
+          fadeOutHTML5(domAudioDay);
+          fadeOutHTML5(domAudioNight);
+        }
+
+        function crossfadeDOMAudio(toNight) {
+          const active = toNight ? domAudioNight : domAudioDay;
+          const inactive = toNight ? domAudioDay : domAudioNight;
+          fadeOutHTML5(inactive);
+          active.volume = 0.75;
+          const p = active.play();
+          if (p && p.catch) p.catch(() => {});
         }
 
         function start() {
           on = true;
           played = true;
-          const active = getCurrentAudio();
-          const inactive = isNight() ? audioDay : audioNight;
-          fadeOut(inactive);
-          if (active.volume < 0.25) active.volume = 0.25;
-          const p = active.play();
-          if (p && p.then) {
-            p.then(() => {
-              fadeIn(active);
-            }).catch(err => {
-              active.volume = 0.75;
-              console.warn('Audio play catch:', err);
-            });
+          getAudioContext();
+
+          // Try Web Audio first for zero latency; also trigger DOM Audio as guaranteed backup
+          const webAudioStarted = playWebAudio();
+          if (!webAudioStarted) {
+            playDOMAudio();
           }
+
           ui();
         }
 
         function stop() {
           on = false;
-          fadeOut(audioDay);
-          fadeOut(audioNight);
+          stopWebAudio();
+          stopDOMAudio();
           ui();
         }
 
@@ -41657,17 +41793,11 @@ void main() {
           isSwitchingTheme = true;
           setTimeout(() => { isSwitchingTheme = false; }, 80);
 
-          const toPlay = getCurrentAudio();
-          const toStop = isNight() ? audioDay : audioNight;
-          fadeOut(toStop);
-          try { toPlay.currentTime = 0; } catch (_) {}
-          toPlay.volume = 0.25;
-          const p = toPlay.play();
-          if (p && p.then) {
-            p.then(() => fadeIn(toPlay)).catch(err => {
-              toPlay.volume = 0.75;
-              console.warn('Theme switch play catch:', err);
-            });
+          const night = isNight();
+          if (webAudioReady && daySource && nightSource) {
+            crossfadeWebAudio(night);
+          } else {
+            crossfadeDOMAudio(night);
           }
         }
 
@@ -41703,9 +41833,8 @@ void main() {
         };
 
         ui();
-        np.classList.add('paused'); // always there, top right, in a fixed spot (CSS)
+        np.classList.add('paused');
 
-        // its width follows its label; the case-study bar reads it so the gap beside it stays exact
         const npw = () => document.documentElement.style.setProperty('--npw', np.offsetWidth + 'px');
         if (window.ResizeObserver) new ResizeObserver(npw).observe(np);
         npw();
