@@ -40784,15 +40784,15 @@ void main() {
         const vowels = (L.match(/[aeiouy]/gi) || []).length / L.length, run = Math.max(0, ...(L.match(/[^aeiou]+/gi) || []).map(r => r.length));
         return (flips >= 4 && L.length >= 8) || (vowels < .25 && run >= 7 && L.length >= 8);
       };
-      const junkText = t => String(t || '').split(/\s+/).some(junkWord);
-      const noteShort = t => { t = String(t || '').trim(); return t.length < 8 || t.split(/\s+/).filter(w => /\p{L}/u.test(w)).length < 2; };
+      const junkText = t => false;
+      const noteShort = t => false;
       // notes taken down by hand (the server hides the same ones)
-      const NOTE_BLOCK = ['lihwak', 'testing the functionality and and validation'];
+      const NOTE_BLOCK = ['lihwak'];
       const noteBlocked = n => { const t = [n.note, n.name, n.company, n.role].join(' ').toLowerCase(); return NOTE_BLOCK.some(w => t.includes(w)); };
       // one Tamil note on the wall, shown in English (the original was cut off at the 200-character limit)
       const NOTE_EN = [['படைப்பாற்றல், நேர்த்தியான', 'This portfolio is the finest expression of creativity, elegant design and meticulous craftsmanship. Its unique artistry and flawless creation are beautifully reflected in it.']];
       const noteEn = n => { const t = String(n.note || '').replace(/^["“\s]+/, ''), hit = NOTE_EN.find(([k]) => t.startsWith(k)); return hit ? { ...n, note: hit[1] } : n; };
-      const noteOk = n => !noteBlocked(n) && !noteShort(n.note) && /\p{L}/u.test(String(n.name || '')) && ![n.note, n.name, n.company, n.role].some(junkText);
+      const noteOk = n => !noteBlocked(n) && Boolean(n.note && String(n.note).trim().length > 0);
       const notesMap = new Map();
       function extractNoteFromCard(card) {
         if (!card) return { name: '', note: '', company: '', role: '', photo: '', avatar: '' };
@@ -41303,9 +41303,8 @@ void main() {
         const name = $('#nwName').value.trim(), email = $('#nwEmail').value.trim(), note = $('#nwNote').value.trim();
         if (!name) { nwErr.textContent = 'Add your name.'; $('#nwName').focus(); return; }
         if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { nwErr.textContent = 'That email doesn’t look right.'; $('#nwEmail').focus(); return; }
-        if (!note) { nwErr.textContent = 'Write a little something.'; $('#nwNote').focus(); return; }
-        if (noteShort(note)) { nwErr.textContent = 'Write a little more, at least a couple of words.'; $('#nwNote').focus(); return; }
-        if (junkText(note) || junkText(name) || junkText($('#nwCo').value) || junkText($('#nwRole').value)) { nwErr.textContent = 'That doesn’t look like real words. Try again?'; $('#nwNote').focus(); return; }
+        if (!note) { nwErr.textContent = 'Write a note.'; $('#nwNote').focus(); return; }
+        if (note.length > 300) { nwErr.textContent = 'Notes are limited to a maximum of 300 characters.'; $('#nwNote').focus(); return; }
         const go = $('#nwGo'); go.disabled = true; nwErr.textContent = '';
         const company = $('#nwCo').value.trim().slice(0, 40), role = $('#nwRole').value.trim().slice(0, 40);
         // no logo picked? still try to recognise the company by name, alias or its Simple Icons slug
