@@ -51,8 +51,39 @@ const server = http.createServer((req, res) => {
     if (!err && stats.isFile()) {
       const ext = path.extname(filePath).toLowerCase();
       const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+      const range = req.headers.range;
+
+      if (range) {
+        const parts = range.replace(/bytes=/, "").split("-");
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : stats.size - 1;
+
+        if (isNaN(start) || isNaN(end) || start > end || start >= stats.size) {
+          res.writeHead(416, {
+            'Content-Range': `bytes */${stats.size}`,
+            'Access-Control-Allow-Origin': '*'
+          });
+          res.end();
+          return;
+        }
+
+        const chunksize = (end - start) + 1;
+        res.writeHead(206, {
+          'Content-Range': `bytes ${start}-${end}/${stats.size}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': chunksize,
+          'Content-Type': contentType,
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'no-cache'
+        });
+        fs.createReadStream(filePath, { start, end }).pipe(res);
+        return;
+      }
+
       res.writeHead(200, {
         'Content-Type': contentType,
+        'Content-Length': stats.size,
+        'Accept-Ranges': 'bytes',
         'Access-Control-Allow-Origin': '*',
         'Cache-Control': 'no-cache'
       });

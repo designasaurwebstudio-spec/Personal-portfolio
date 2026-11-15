@@ -41489,21 +41489,52 @@ void main() {
 
         let played = false, on = false;
 
-        // Day song: Day song.mp3 | Night song: Background score.mp3
-        const audioDay = new Audio('Day song.mp3');
-        audioDay.loop = true;
-        audioDay.preload = 'auto';
+        function createAudioTrack(sources) {
+          const aud = new Audio();
+          aud.loop = true;
+          aud.preload = 'auto';
+          let sIdx = 0;
+          aud.src = sources[0];
+          aud.addEventListener('error', () => {
+            sIdx++;
+            if (sIdx < sources.length) {
+              aud.src = sources[sIdx];
+              aud.load();
+            }
+          });
+          return aud;
+        }
 
-        const audioNight = new Audio('Background score.mp3');
-        audioNight.loop = true;
-        audioNight.preload = 'auto';
+        // Day song: Day song.mp3 | Night song: Background score.mp3
+        const audioDay = createAudioTrack([
+          '/day-song.mp3',
+          'day-song.mp3',
+          'Day%20song.mp3',
+          'Day song.mp3',
+          '/v2/sfx/day-song.mp3',
+          'https://www.jameschugh.com/day-song.mp3'
+        ]);
+
+        const audioNight = createAudioTrack([
+          '/background-score.mp3',
+          'background-score.mp3',
+          'Background%20score.mp3',
+          'Background score.mp3',
+          '/v2/sfx/background-score.mp3',
+          'https://www.jameschugh.com/background-score.mp3'
+        ]);
+
+        // Expose for testing/debugging
+        window._audioDay = audioDay;
+        window._audioNight = audioNight;
 
         const isNight = () => document.documentElement.dataset.theme === 'dark';
         const getCurrentAudio = () => isNight() ? audioNight : audioDay;
 
         function fadeIn(aud, targetVol = 0.75) {
+          if (!aud) return;
           clearInterval(aud._fadeTimer);
-          aud.volume = 0;
+          if (aud.volume < 0.2) aud.volume = 0.2;
           aud._fadeTimer = setInterval(() => {
             if (aud.volume < targetVol - 0.05) {
               aud.volume = Math.min(targetVol, aud.volume + 0.05);
@@ -41515,10 +41546,16 @@ void main() {
         }
 
         function fadeOut(aud, cb) {
+          if (!aud) { if (cb) cb(); return; }
           clearInterval(aud._fadeTimer);
+          if (aud.paused) {
+            aud.volume = 0;
+            if (cb) cb();
+            return;
+          }
           aud._fadeTimer = setInterval(() => {
-            if (aud.volume > 0.06) {
-              aud.volume = Math.max(0, aud.volume - 0.06);
+            if (aud.volume > 0.08) {
+              aud.volume = Math.max(0, aud.volume - 0.08);
             } else {
               aud.volume = 0;
               clearInterval(aud._fadeTimer);
@@ -41534,11 +41571,16 @@ void main() {
           const active = getCurrentAudio();
           const inactive = isNight() ? audioDay : audioNight;
           fadeOut(inactive);
-          active.play().then(() => {
-            fadeIn(active);
-          }).catch(() => {
-            active.volume = 0.75;
-          });
+          if (active.volume < 0.25) active.volume = 0.25;
+          const p = active.play();
+          if (p && p.then) {
+            p.then(() => {
+              fadeIn(active);
+            }).catch(err => {
+              active.volume = 0.75;
+              console.warn('Audio play catch:', err);
+            });
+          }
           ui();
         }
 
@@ -41549,13 +41591,25 @@ void main() {
           ui();
         }
 
+        let isSwitchingTheme = false;
         function onThemeSwitch() {
           if (!on) return;
+          if (isSwitchingTheme) return;
+          isSwitchingTheme = true;
+          setTimeout(() => { isSwitchingTheme = false; }, 80);
+
           const toPlay = getCurrentAudio();
           const toStop = isNight() ? audioDay : audioNight;
-          toPlay.currentTime = 0;
-          toPlay.play().then(() => fadeIn(toPlay)).catch(() => { toPlay.volume = 0.75; });
           fadeOut(toStop);
+          try { toPlay.currentTime = 0; } catch (_) {}
+          toPlay.volume = 0.25;
+          const p = toPlay.play();
+          if (p && p.then) {
+            p.then(() => fadeIn(toPlay)).catch(err => {
+              toPlay.volume = 0.75;
+              console.warn('Theme switch play catch:', err);
+            });
+          }
         }
 
         window.addEventListener('themechange', onThemeSwitch);
