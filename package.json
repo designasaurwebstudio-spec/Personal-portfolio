@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Pixel-perfect clone of jameschugh.com reverse engineered with full design system, interactive canvas, Lenis smooth scroll, Web Audio synthesizer, sound effects, and diorama.",
   "scripts": {
+    "build": "echo 'Static build ready'",
     "start": "node server.js",
     "dev": "node server.js"
   },
