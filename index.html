@@ -36638,6 +36638,8 @@
     })();
   </script>
   <header class="bar">
+    <audio id="audioDay" loop playsinline preload="auto" src="day-song.mp3"></audio>
+    <audio id="audioNight" loop playsinline preload="auto" src="background-score.mp3"></audio>
     <button class="np" id="np" type="button" aria-label="Play music" title="Play music"><span class="np-d"
         aria-hidden="true"></span><span class="np-t">Music on the hill</span><span class="np-b"
         aria-hidden="true"><i></i><i></i></span></button>
@@ -41543,56 +41545,77 @@ void main() {
       /* ---------- music on the hill: Day & Night score ---------- */
       (() => {
         const radio = $('#radio'), pinR = $('#radioPin'), np = $('#np'), lbl = $('.rpl', pinR);
-        if (np) document.body.appendChild(np); // out of the top bar's layer, so it can sit above an open case study
+        if (np) document.body.appendChild(np);
         if (!radio || !pinR || !np) return;
 
         let played = false, on = false;
 
-        // Create in-DOM audio elements for 100% native browser media compatibility
-        function createDOMAudio(id, sources) {
-          let aud = document.getElementById(id);
-          if (!aud) {
-            aud = document.createElement('audio');
-            aud.id = id;
-            aud.loop = true;
-            aud.setAttribute('playsinline', '');
-            aud.setAttribute('webkit-playsinline', '');
-            aud.preload = 'auto';
-            sources.forEach(src => {
-              const s = document.createElement('source');
-              s.src = src;
-              s.type = 'audio/mpeg';
-              aud.appendChild(s);
-            });
-            document.body.appendChild(aud);
-          }
-          return aud;
+        const DAY_SOURCES = [
+          'day-song.mp3',
+          '/day-song.mp3',
+          'v2/sfx/day-song.mp3',
+          '/v2/sfx/day-song.mp3',
+          'https://raw.githubusercontent.com/designasaurwebstudio-spec/Personal-portfolio/main/day-song.mp3'
+        ];
+
+        const NIGHT_SOURCES = [
+          'background-score.mp3',
+          '/background-score.mp3',
+          'v2/sfx/background-score.mp3',
+          '/v2/sfx/background-score.mp3',
+          'https://raw.githubusercontent.com/designasaurwebstudio-spec/Personal-portfolio/main/background-score.mp3'
+        ];
+
+        let domDay = document.getElementById('audioDay');
+        if (!domDay) {
+          domDay = document.createElement('audio');
+          domDay.id = 'audioDay';
+          domDay.loop = true;
+          domDay.setAttribute('playsinline', '');
+          domDay.preload = 'auto';
+          domDay.src = DAY_SOURCES[0];
+          document.body.appendChild(domDay);
         }
 
-        const domAudioDay = createDOMAudio('audioDay', [
-          '/day-song.mp3',
-          'day-song.mp3',
-          '/v2/sfx/day-song.mp3',
-          'v2/sfx/day-song.mp3',
-          '/Day%20song.mp3',
-          'Day%20song.mp3'
-        ]);
+        let domNight = document.getElementById('audioNight');
+        if (!domNight) {
+          domNight = document.createElement('audio');
+          domNight.id = 'audioNight';
+          domNight.loop = true;
+          domNight.setAttribute('playsinline', '');
+          domNight.preload = 'auto';
+          domNight.src = NIGHT_SOURCES[0];
+          document.body.appendChild(domNight);
+        }
 
-        const domAudioNight = createDOMAudio('audioNight', [
-          '/background-score.mp3',
-          'background-score.mp3',
-          '/v2/sfx/background-score.mp3',
-          'v2/sfx/background-score.mp3',
-          '/Background%20score.mp3',
-          'Background%20score.mp3'
-        ]);
+        function setupFallback(aud, sources) {
+          let idx = 0;
+          aud.addEventListener('error', () => {
+            idx++;
+            if (idx < sources.length) {
+              console.log('Audio fallback to:', sources[idx]);
+              aud.src = sources[idx];
+              aud.load();
+              if (on && getCurrentAudio() === aud) {
+                aud.play().catch(() => {});
+              }
+            }
+          });
+        }
+        setupFallback(domDay, DAY_SOURCES);
+        setupFallback(domNight, NIGHT_SOURCES);
 
-        // Web Audio API engine for zero-latency, range-free playback
+        const isNight = () => document.documentElement.dataset.theme === 'dark';
+        const getCurrentAudio = () => isNight() ? domNight : domDay;
+
+        window._audioDay = domDay;
+        window._audioNight = domNight;
+
+        // Web Audio API engine
         let audioCtx = null;
         let dayBuffer = null, nightBuffer = null;
         let daySource = null, nightSource = null;
         let dayGain = null, nightGain = null;
-        let webAudioReady = false;
 
         function getAudioContext() {
           if (!audioCtx) {
@@ -41605,47 +41628,38 @@ void main() {
           return audioCtx;
         }
 
-        // Preload Web Audio buffers
-        async function loadBuffer(url) {
-          try {
-            const ctx = getAudioContext();
-            if (!ctx) return null;
-            const res = await fetch(url);
-            if (!res.ok) return null;
-            const ab = await res.arrayBuffer();
-            return await ctx.decodeAudioData(ab);
-          } catch (_) {
-            return null;
+        async function fetchAudioBuffer(urls) {
+          const ctx = getAudioContext();
+          if (!ctx) return null;
+          for (const u of urls) {
+            try {
+              const r = await fetch(u);
+              if (r.ok) {
+                const b = await r.arrayBuffer();
+                return await ctx.decodeAudioData(b);
+              }
+            } catch (_) {}
           }
+          return null;
         }
 
         async function initWebAudio() {
-          if (webAudioReady) return;
+          if (dayBuffer && nightBuffer) return;
           try {
-            const [bDay, bNight] = await Promise.all([
-              loadBuffer('/day-song.mp3'),
-              loadBuffer('/background-score.mp3')
+            const [b1, b2] = await Promise.all([
+              fetchAudioBuffer(DAY_SOURCES),
+              fetchAudioBuffer(NIGHT_SOURCES)
             ]);
-            dayBuffer = bDay;
-            nightBuffer = bNight;
-            if (dayBuffer && nightBuffer) webAudioReady = true;
+            if (b1) dayBuffer = b1;
+            if (b2) nightBuffer = b2;
           } catch (_) {}
         }
-
-        // Start loading buffers early
         initWebAudio();
         addEventListener('pointerdown', () => { getAudioContext(); initWebAudio(); }, { once: true, passive: true });
-
-        const isNight = () => document.documentElement.dataset.theme === 'dark';
-
-        // Expose handles for debugging
-        window._audioDay = domAudioDay;
-        window._audioNight = domAudioNight;
 
         function playWebAudio() {
           const ctx = getAudioContext();
           if (!ctx || !dayBuffer || !nightBuffer) return false;
-
           try {
             if (daySource) { try { daySource.stop(); } catch (_) {} }
             if (nightSource) { try { nightSource.stop(); } catch (_) {} }
@@ -41675,7 +41689,6 @@ void main() {
             nightSource.start(0);
             return true;
           } catch (e) {
-            console.warn('WebAudio play fallback to HTML5 Audio:', e);
             return false;
           }
         }
@@ -41684,12 +41697,12 @@ void main() {
           if (!audioCtx) return;
           try {
             const t = audioCtx.currentTime;
-            if (dayGain) dayGain.gain.linearRampToValueAtTime(0, t + 0.3);
-            if (nightGain) nightGain.gain.linearRampToValueAtTime(0, t + 0.3);
+            if (dayGain) dayGain.gain.linearRampToValueAtTime(0, t + 0.25);
+            if (nightGain) nightGain.gain.linearRampToValueAtTime(0, t + 0.25);
             setTimeout(() => {
               if (daySource) { try { daySource.stop(); } catch (_) {} daySource = null; }
               if (nightSource) { try { nightSource.stop(); } catch (_) {} nightSource = null; }
-            }, 350);
+            }, 300);
           } catch (_) {}
         }
 
@@ -41711,7 +41724,7 @@ void main() {
         function fadeInHTML5(aud, targetVol = 0.75) {
           if (!aud) return;
           clearInterval(aud._fadeTimer);
-          aud.volume = Math.max(0.1, aud.volume || 0);
+          aud.volume = Math.max(0.15, aud.volume || 0);
           aud._fadeTimer = setInterval(() => {
             if (aud.volume < targetVol - 0.05) {
               aud.volume = Math.min(targetVol, aud.volume + 0.05);
@@ -41739,26 +41752,26 @@ void main() {
         }
 
         function playDOMAudio() {
-          const active = isNight() ? domAudioNight : domAudioDay;
-          const inactive = isNight() ? domAudioDay : domAudioNight;
+          const active = isNight() ? domNight : domDay;
+          const inactive = isNight() ? domDay : domNight;
           fadeOutHTML5(inactive);
           active.volume = 0.75;
           const p = active.play();
           if (p && p.catch) {
             p.catch(err => {
-              console.warn('DOM Audio play error:', err);
+              console.warn('DOM Audio play catch:', err);
             });
           }
         }
 
         function stopDOMAudio() {
-          fadeOutHTML5(domAudioDay);
-          fadeOutHTML5(domAudioNight);
+          fadeOutHTML5(domDay);
+          fadeOutHTML5(domNight);
         }
 
         function crossfadeDOMAudio(toNight) {
-          const active = toNight ? domAudioNight : domAudioDay;
-          const inactive = toNight ? domAudioDay : domAudioNight;
+          const active = toNight ? domNight : domDay;
+          const inactive = toNight ? domDay : domNight;
           fadeOutHTML5(inactive);
           active.volume = 0.75;
           const p = active.play();
@@ -41770,12 +41783,10 @@ void main() {
           played = true;
           getAudioContext();
 
-          // Try Web Audio first for zero latency; also trigger DOM Audio as guaranteed backup
           const webAudioStarted = playWebAudio();
           if (!webAudioStarted) {
             playDOMAudio();
           }
-
           ui();
         }
 
@@ -41794,7 +41805,7 @@ void main() {
           setTimeout(() => { isSwitchingTheme = false; }, 80);
 
           const night = isNight();
-          if (webAudioReady && daySource && nightSource) {
+          if (daySource && nightSource) {
             crossfadeWebAudio(night);
           } else {
             crossfadeDOMAudio(night);
