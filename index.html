@@ -38351,7 +38351,7 @@ void main() {
         world3.style.width = MW + 'px'; world3.style.height = MH + 'px';
         spot = $('#spot'); carve = $('#carve'); casing = $('#casing'); ghost = $('#ghostPath');
         pathLen = carve.getTotalLength();
-        [carve, casing].forEach(p => { p.style.strokeDasharray = pathLen; p.style.strokeDashoffset = 0; });
+        [carve, casing].forEach(p => { p.style.strokeDasharray = pathLen; p.style.strokeDashoffset = pathLen; });
         stopL = STOPS.map(st => { let best = 0, bd = 1e12; for (let l = 0; l <= pathLen; l += 4) { const q = carve.getPointAtLength(l), dd = (q.x - st.at[0]) ** 2 + (q.y - st.at[1]) ** 2; if (dd < bd) { bd = dd; best = l; } } return best; });
         const pinShape = c => `<svg viewBox="0 0 54 66"><path d="M27 64C27 64 4 40 4 25a23 23 0 0 1 46 0c0 15-23 39-23 39z" fill="${c}" stroke="#fff" stroke-width="3"/></svg>`;
         STOPS.forEach((st, i) => {
@@ -38439,15 +38439,27 @@ void main() {
       addEventListener('pointermove', e => { if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (Math.abs(dx) + Math.abs(dy) > 4) dragMoved = true; pan.x = drag.px + dx; pan.y = drag.py + dy; });
       addEventListener('pointerup', () => { if (drag) { drag = null; mapview.classList.remove('drag'); setTimeout(() => dragMoved = false, 0); } });
       mapview.addEventListener('click', e => { if (!e.target.closest('.poi')) pois.forEach(q => q.classList.remove('tipon')); });
-      function layoutJourney() { jCar = vw <= 1100; journey.classList.toggle('jcm', jCar); $('.j-how').textContent = jCar ? 'Tap through them, or swipe the map.' : 'Scroll to walk the path.'; jTrack.style.height = jCar ? '' : DONE.j ? '100vh' : (N * 84 + 200) + 'vh'; jTop = top(jTrack); jRange = Math.max(1, jTrack.offsetHeight - vh); headB = jHead.offsetTop + jHead.offsetHeight; jFade.style.setProperty('--hb', headB + 'px'); }
+      function layoutJourney() { jCar = vw < 860; journey.classList.toggle('jcm', jCar); $('.j-how').textContent = jCar ? 'Tap through them, or swipe the map.' : 'Scroll to walk the path.'; jTrack.style.height = jCar ? '' : (N * 85 + 160) + 'vh'; jTop = top(jTrack); jRange = Math.max(1, jTrack.offsetHeight - vh); headB = jHead.offsetTop + jHead.offsetHeight; jFade.style.setProperty('--hb', headB + 'px'); }
       const PH = { hold: .05, zoom: .12, walk: .91 };
       function phase(p) {
         if (p < PH.hold) return { pos: -1, k: 0, out: 0 };
         if (p < PH.zoom) { const k = ss((p - PH.hold) / (PH.zoom - PH.hold)); return { pos: -1 + k, k, out: 0 }; }
-        if (p < PH.walk) { const t = (p - PH.zoom) / (PH.walk - PH.zoom) * (N - 1), i = Math.min(N - 2, Math.floor(t)), f = t - i; return { pos: i + f - .55 * Math.sin(2 * Math.PI * f) / (2 * Math.PI), k: 1, out: 0 }; }
-        return { pos: N - 1, k: 1, out: ss(clamp((p - PH.walk) / .07)) };
+        if (p < PH.walk) {
+          const t = (p - PH.zoom) / (PH.walk - PH.zoom) * (N - 1), i = Math.min(N - 2, Math.floor(t)), f = t - i;
+          return { pos: i + f - .55 * Math.sin(2 * Math.PI * f) / (2 * Math.PI), k: 1, out: 0 };
+        }
+        const outK = ss(clamp((p - PH.walk) / .08));
+        return { pos: (N - 1) + outK, k: 1 - outK * .8, out: outK };
       }
-      const lenAt = pos => { if (pos <= 0) return pos < -.999 ? 0 : stopL[0] * (1 + pos); const i = Math.min(N - 2, Math.floor(pos)), f = pos - i; return stopL[i] + (stopL[i + 1] - stopL[i]) * f; };
+      const lenAt = pos => {
+        if (pos <= 0) return pos < -.999 ? 0 : stopL[0] * (1 + pos);
+        if (pos >= N - 1) {
+          const f = clamp(pos - (N - 1));
+          return stopL[N - 1] + (pathLen - stopL[N - 1]) * f;
+        }
+        const i = Math.min(N - 2, Math.floor(pos)), f = pos - i;
+        return stopL[i] + (stopL[i + 1] - stopL[i]) * f;
+      };
       const cam3 = { x: 0, y: 0, s: 0, ok: false };
       const cardW = () => mobile ? 0 : Math.min(26 * 16, vw - 32) + 44;
       function viewFor(cx, cy, s) { const L = cardW(), fx = mobile ? vw * .5 : L + (vw - L) * .36, fy = mobile ? vh * .33 : vh * .58; return { x: fx - cx * s, y: fy - cy * s, s }; }
@@ -38456,7 +38468,10 @@ void main() {
       function frameJourney(dt, y) {
         if (jCar) { const ke = reduce ? 1 : 1 - Math.exp(-dt * (jdrag ? 22 : 4.6)); jpos += (jposT - jpos) * ke; if (Math.abs(jposT - jpos) < .0005) jpos = jposT; }
         const p = jCar ? (jpos <= -.999 ? 0 : .5) : clamp((y - jTop) / jRange), ph = jCar ? (jpos < 0 ? { pos: jpos, k: ss(jpos + 1), out: 0 } : { pos: jpos, k: 1, out: 0 }) : phase(p);
-        const L = lenAt(Math.max(ph.pos, 0)), tip = carve.getPointAtLength(Math.max(0.01, L));
+        const carved = jCar && mobile ? (jposT < 0 ? 0 : lenAt(jposT)) : lenAt(ph.pos);
+        const q = mobile ? 12 : 3, off = Math.max(0, Math.min(pathLen, Math.round((pathLen - carved) / q) * q)).toFixed(0);
+        if (off !== frameJourney.off) { frameJourney.off = off; carve.style.strokeDashoffset = off; casing.style.strokeDashoffset = off; }
+        const tip = carve.getPointAtLength(Math.max(0.01, carved));
         const O = overview(), Z = (mobile ? .5 : jCar ? .52 : clamp(vw / 3000, .44, .6)) * uz;
         const dip = 0;
         const F = viewFor(tip.x, tip.y, Z * (1 - dip));
@@ -38470,7 +38485,6 @@ void main() {
         cam3.x += (T.x - cam3.x) * e; cam3.y += (T.y - cam3.y) * e; cam3.s += (T.s - cam3.s) * e;
         world3.style.transform = `translate3d(${cam3.x.toFixed(1)}px, ${cam3.y.toFixed(1)}px, 0) scale(${cam3.s.toFixed(4)})`;
         const inv = Math.round(clamp(1 / cam3.s, .55, 3) * 20) / 20; if (inv !== frameJourney.inv) { frameJourney.inv = inv; world3.style.setProperty('--inv', inv.toFixed(3)); }
-        if (frameJourney.off !== 0) { frameJourney.off = 0; carve.style.strokeDashoffset = 0; casing.style.strokeDashoffset = 0; }
         const go = (1 - ph.k * .8 + ph.out * .8).toFixed(2); if (go !== frameJourney.go) { frameJourney.go = go; ghost.style.opacity = go; }
         const settled = ph.k > .95 && !ph.out && Math.abs(ph.pos - Math.round(ph.pos)) < .06;
         const active = ph.pos < -.35 || ph.out > .3 ? -1 : Math.round(ph.pos);
@@ -38488,17 +38502,15 @@ void main() {
         spot.classList.toggle('on', active >= 0 && ph.k > .9);
         showPols(-1);
 
-        // Continuous forward-only journey indicator along 100% of the heart route
-        const loopDuration = 22;
-        const speed = pathLen / loopDuration;
-        meTipDist = (meTipDist + speed * dt) % pathLen;
-        const tipPt = carve.getPointAtLength(meTipDist);
+        // Direction indicator sits at the tip of the carved route
+        const curDist = Math.max(0.01, Math.min(pathLen, carved));
+        const tipPt = carve.getPointAtLength(curDist);
         const mt = `translate3d(${tipPt.x.toFixed(1)}px, ${tipPt.y.toFixed(1)}px, 0) translate(-50%, -50%) scale(var(--inv, 1))`;
         if (mt !== frameJourney.mt) { frameJourney.mt = mt; meTip.style.transform = mt; }
 
-        const ds = 100;
-        const d1 = (meTipDist - ds + pathLen) % pathLen;
-        const d2 = (meTipDist + ds) % pathLen;
+        const ds = 80;
+        const d1 = Math.max(0, curDist - ds);
+        const d2 = Math.min(pathLen, curDist + ds);
         const p1 = carve.getPointAtLength(d1);
         const p2 = carve.getPointAtLength(d2);
         const want = Math.atan2(p2.x - p1.x, -(p2.y - p1.y)) * 180 / Math.PI;
@@ -38506,9 +38518,9 @@ void main() {
         const curMod = ((heading % 360) + 360) % 360;
         const wantMod = ((want % 360) + 360) % 360;
         let dh = ((wantMod - curMod + 540) % 360) - 180;
-        heading += dh * Math.min(1, dt * 15);
+        heading += dh * (reduce ? 1 : Math.min(1, dt * 14));
 
-        meTip.style.opacity = '1';
+        meTip.style.opacity = ph.pos > -.95 && ph.out < .9 ? '1' : '0';
         meTip.style.setProperty('--hd', heading.toFixed(1) + 'deg');
         needle.style.transform = `rotate(${heading.toFixed(1)}deg)`;
         compass.classList.toggle('in', p > .005 && p < .999);
@@ -41892,7 +41904,6 @@ void main() {
         let y = Y();
         fold('v', valley, $('#journey'), () => { story.style.marginTop = '0px'; });
         fold('s', story, $('#journey'));
-        if (!jCar) fold('j', jTrack, $('#work'));
         if (boxOpen) fold('box', boxTrack, $('#brand'));
         if (!giftTap) fold('st', stackTrack, $('#process'));
         fold('ll', llRevTrack, llRoles);
