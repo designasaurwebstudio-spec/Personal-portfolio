@@ -38162,7 +38162,7 @@ void main() {
       let spot, spotG; const spotC = { x: STOPS[0].at[0], y: STOPS[0].at[1] };
       let jCar = false, jpos = -1, jposT = -1, jdrag = false, jIdx = -1;
       const holeR = STOPS.map(() => 0);
-      let jTop = 0, jRange = 1, carve, casing, ghost, fogPath, holes = [], pathLen = 0, stopL = [], jmarks = [], pois = [], lastCard = -2, heading = 0, polFor = -2;
+      let jTop = 0, jRange = 1, carve, casing, ghost, fogPath, holes = [], pathLen = 0, stopL = [], jmarks = [], pois = [], lastCard = -2, heading = -90, meTipDist = 0, polFor = -2;
       const mrand = (a => () => (a = (a * 16807) % 2147483647) / 2147483647)(42);
       const blob = (cx, cy, rx, ry, amp, seed) => { let d = ''; for (let a = 0; a <= 64; a++) { const t = a / 64 * Math.PI * 2, w = 1 + amp * (Math.sin(3 * t + seed) * .6 + Math.sin(5 * t + seed * 2) * .3 + Math.sin(8 * t + seed) * .1); d += (a ? 'L' : 'M') + (cx + Math.cos(t) * rx * w).toFixed(1) + ' ' + (cy + Math.sin(t) * ry * w).toFixed(1); } return d + 'Z'; };
       const grad = c => `linear-gradient(145deg, color-mix(in srgb, ${c} 55%, #fff), ${c})`;
@@ -38351,7 +38351,7 @@ void main() {
         world3.style.width = MW + 'px'; world3.style.height = MH + 'px';
         spot = $('#spot'); carve = $('#carve'); casing = $('#casing'); ghost = $('#ghostPath');
         pathLen = carve.getTotalLength();
-        [carve, casing].forEach(p => { p.style.strokeDasharray = pathLen; p.style.strokeDashoffset = pathLen; });
+        [carve, casing].forEach(p => { p.style.strokeDasharray = pathLen; p.style.strokeDashoffset = 0; });
         stopL = STOPS.map(st => { let best = 0, bd = 1e12; for (let l = 0; l <= pathLen; l += 4) { const q = carve.getPointAtLength(l), dd = (q.x - st.at[0]) ** 2 + (q.y - st.at[1]) ** 2; if (dd < bd) { bd = dd; best = l; } } return best; });
         const pinShape = c => `<svg viewBox="0 0 54 66"><path d="M27 64C27 64 4 40 4 25a23 23 0 0 1 46 0c0 15-23 39-23 39z" fill="${c}" stroke="#fff" stroke-width="3"/></svg>`;
         STOPS.forEach((st, i) => {
@@ -38470,10 +38470,7 @@ void main() {
         cam3.x += (T.x - cam3.x) * e; cam3.y += (T.y - cam3.y) * e; cam3.s += (T.s - cam3.s) * e;
         world3.style.transform = `translate3d(${cam3.x.toFixed(1)}px, ${cam3.y.toFixed(1)}px, 0) scale(${cam3.s.toFixed(4)})`;
         const inv = Math.round(clamp(1 / cam3.s, .55, 3) * 20) / 20; if (inv !== frameJourney.inv) { frameJourney.inv = inv; world3.style.setProperty('--inv', inv.toFixed(3)); }
-        // phones: the route jumps straight to the next stop instead of repainting on every frame of the glide
-        const carved = jCar && mobile ? (jposT < 0 ? 0 : lenAt(jposT)) : ph.pos < 0 ? stopL[0] * clamp(ph.pos + 1) : L;
-        const q = mobile ? 14 : 4, off = (Math.round((pathLen - carved) / q) * q).toFixed(0);
-        if (off !== frameJourney.off) { frameJourney.off = off; carve.style.strokeDashoffset = off; casing.style.strokeDashoffset = off; }
+        if (frameJourney.off !== 0) { frameJourney.off = 0; carve.style.strokeDashoffset = 0; casing.style.strokeDashoffset = 0; }
         const go = (1 - ph.k * .8 + ph.out * .8).toFixed(2); if (go !== frameJourney.go) { frameJourney.go = go; ghost.style.opacity = go; }
         const settled = ph.k > .95 && !ph.out && Math.abs(ph.pos - Math.round(ph.pos)) < .06;
         const active = ph.pos < -.35 || ph.out > .3 ? -1 : Math.round(ph.pos);
@@ -38490,11 +38487,30 @@ void main() {
         if (active >= 0) { const sx = (cam3.x + spotC.x * cam3.s).toFixed(0), sy = (cam3.y + spotC.y * cam3.s).toFixed(0), sr = (900 * cam3.s).toFixed(0), key = sx + ',' + sy + ',' + sr; if (key !== frameJourney.sp) { frameJourney.sp = key; spot.style.setProperty('--sx', sx + 'px'); spot.style.setProperty('--sy', sy + 'px'); spot.style.setProperty('--sr', sr + 'px'); } }
         spot.classList.toggle('on', active >= 0 && ph.k > .9);
         showPols(-1);
-        meTip.style.opacity = ph.pos > -.5 && ph.out < .5 ? 1 : 0;
-        { const mt = `translate3d(${tip.x.toFixed(1)}px, ${tip.y.toFixed(1)}px, 0) translate(-50%, -50%) scale(var(--inv, 1))`; if (mt !== frameJourney.mt) { frameJourney.mt = mt; meTip.style.transform = mt; } }
-        const ahead = carve.getPointAtLength(Math.min(pathLen, L + 40)), want = ph.pos < 0 || ph.out ? 0 : Math.atan2(ahead.x - tip.x, -(ahead.y - tip.y)) * 180 / Math.PI;
-        let dh = ((want - heading + 540) % 360) - 180; heading += dh * (reduce ? 1 : clamp(dt * 4));
-        needle.style.transform = `rotate(${heading.toFixed(1)}deg)`; meTip.style.setProperty('--hd', heading.toFixed(1) + 'deg');
+
+        // Continuous forward-only journey indicator along 100% of the heart route
+        const loopDuration = 22;
+        const speed = pathLen / loopDuration;
+        meTipDist = (meTipDist + speed * dt) % pathLen;
+        const tipPt = carve.getPointAtLength(meTipDist);
+        const mt = `translate3d(${tipPt.x.toFixed(1)}px, ${tipPt.y.toFixed(1)}px, 0) translate(-50%, -50%) scale(var(--inv, 1))`;
+        if (mt !== frameJourney.mt) { frameJourney.mt = mt; meTip.style.transform = mt; }
+
+        const ds = 100;
+        const d1 = (meTipDist - ds + pathLen) % pathLen;
+        const d2 = (meTipDist + ds) % pathLen;
+        const p1 = carve.getPointAtLength(d1);
+        const p2 = carve.getPointAtLength(d2);
+        const want = Math.atan2(p2.x - p1.x, -(p2.y - p1.y)) * 180 / Math.PI;
+
+        const curMod = ((heading % 360) + 360) % 360;
+        const wantMod = ((want % 360) + 360) % 360;
+        let dh = ((wantMod - curMod + 540) % 360) - 180;
+        heading += dh * Math.min(1, dt * 15);
+
+        meTip.style.opacity = '1';
+        meTip.style.setProperty('--hd', heading.toFixed(1) + 'deg');
+        needle.style.transform = `rotate(${heading.toFixed(1)}deg)`;
         compass.classList.toggle('in', p > .005 && p < .999);
         tlBtns.forEach((b, i) => { b.classList.toggle('on', i === active); b.classList.toggle('done', ph.pos >= i - .08 && ph.k > .5); });
         jtlYr.textContent = active >= 0 ? `${STOPS[active].when} · ${STOPS[active].place}` : '2021 → now';
